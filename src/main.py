@@ -1,7 +1,7 @@
 from datetime import datetime
-from models import Appointment, AvailabilitySlot, HealthcareProfessional
+from models import Appointment, AvailabilitySlot, HealthcareProfessional, Patient
 from availability_service import AvailabilityService
-
+from booking_csv_service import BookingAndCsvService
 
 def parse_date(prompt: str):
     val = input(prompt).strip()
@@ -18,10 +18,15 @@ def main():
     appointments: list[Appointment] = []
 
     avail_service = AvailabilityService(slots)
+    booking_csv_service = BookingAndCsvService(slots, appointments)
 
     while True:
         print("\n Appointment Tracking System")
         print("1. Make Availability for Healthcare Professional")
+        print("2. Search for Availability")
+        print("3. Book an Appointment")
+        print("4. Export Availabilities to CSV")
+        print("5. View Booked Appointments")
         print("0. Exit")
 
         choice = input("Select an option: ").strip()
@@ -53,7 +58,44 @@ def main():
                     prof, s_date, e_date, pattern, s_time, e_time, days_of_week, day_of_month
                 )
                 print(f"Created {len(created)} availability slot(s).")
+                
+            elif choice == "2":
+                spec = input("Filter by Specialty (Enter to skip): ").strip() or None
+                name = input("Filter by Professional Name (Enter to skip): ").strip() or None
+                s_date = parse_date("From Date YYYY-MM-DD (Enter to skip): ")
+                e_date = parse_date("To Date YYYY-MM-DD (Enter to skip): ")
 
+                matches = avail_service.search_availability(spec, name, s_date, e_date)
+                if not matches:
+                    print("No available slots found.")
+                else:
+                    for s in matches:
+                        print(s)
+
+            elif choice == "3":
+                slot_id = input("Enter Slot ID to book: ").strip()
+                p_name = input("Patient Full Name: ").strip()
+                p_phone = input("Patient Telephone: ").strip()
+                p_ramq = input("RAMQ No. (Enter if uninsured): ").strip() or None
+                has_ref = input("Does patient have a referral? (y/n): ").strip().lower() == "y"
+                req_ref = input("Does this service require a referral? (y/n): ").strip().lower() == "y"
+                channel = input("Booking channel (WALK-IN / PHONE): ").strip().upper() or "WALK-IN"
+
+                patient = Patient(p_name, p_phone, p_ramq, has_ref)
+                appt = booking_csv_service.book_appointment(slot_id, patient, channel, req_ref)
+                print(f"Success! {appt}")
+
+            elif choice == "4":
+                path = input("Output CSV filename (default: availabilities_export.csv): ").strip()
+                path = path or "availabilities_export.csv"
+                count = booking_csv_service.export_availabilities_to_csv(path)
+                print(f"Exported {count} availability record(s) to '{path}'.")
+
+            elif choice == "5":
+                if not appointments:
+                    print("No appointments booked yet.")
+                for a in appointments:
+                    print(a)
             elif choice == "0":
                 break
             else:
