@@ -22,6 +22,7 @@ class Patient:
     telephone: str
     ramq_no: Optional[str] = None
     has_referral: bool = False
+    patient_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass
@@ -49,6 +50,7 @@ class Appointment:
     slot: AvailabilitySlot
     booking_channel: str  # "WALK-IN" or "PHONE"
     appointment_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    appointment_status: str = "Confirmed"
 
     def str(self) -> str:
         return (

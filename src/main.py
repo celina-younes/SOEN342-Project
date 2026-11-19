@@ -21,12 +21,13 @@ def main():
     booking_csv_service = BookingAndCsvService(slots, appointments)
 
     while True:
-        print("\n Appointment Tracking System")
+        print("\n === Appointment Tracking System ===")
         print("1. Make Availability for Healthcare Professional")
         print("2. Search for Availability")
         print("3. Book an Appointment")
         print("4. Export Availabilities to CSV")
         print("5. View Booked Appointments")
+        print("6. Import Professional Availability from CSV")
         print("0. Exit")
 
         choice = input("Select an option: ").strip()
@@ -83,7 +84,26 @@ def main():
 
                 patient = Patient(p_name, p_phone, p_ramq, has_ref)
                 appt = booking_csv_service.book_appointment(slot_id, patient, channel, req_ref)
-                print(f"Success! {appt}")
+                slot = appt.slot
+                professional = slot.professional
+                print("\nAppointment booked successfully:")
+                print(f"Appointment ID: {appt.appointment_id}")
+                print(
+                    f"  Patient: {appt.patient.full_name} "
+                    f"({appt.patient.telephone})"
+                )
+                print(
+                    f"  Professional: {professional.title} "
+                    f"{professional.full_name}"
+                )
+                print(f"  Specialty: {professional.specialty}")
+                print(f"  Date: {slot.slot_date:%Y-%m-%d}")
+                print(
+                    f"  Time: {slot.start_time:%H:%M} - "
+                    f"{slot.end_time:%H:%M}"
+                )
+                print(f"  Booking channel: {appt.booking_channel}")
+                print(f"  Slot ID: {slot.slot_id}")
 
             elif choice == "4":
                 path = input("Output CSV filename (default: availabilities_export.csv): ").strip()
@@ -94,8 +114,39 @@ def main():
             elif choice == "5":
                 if not appointments:
                     print("No appointments booked yet.")
-                for a in appointments:
-                    print(a)
+                else:
+                    print("\nBooked Appointments:")
+                    for appointment in appointments:
+                        slot = appointment.slot
+                        professional = slot.professional
+                        print(f"\nAppointment ID: {appointment.appointment_id}")
+                        print(
+                            f"  Patient: {appointment.patient.full_name} "
+                            f"({appointment.patient.telephone})"
+                        )
+                        print(
+                            f"  Professional: {professional.title} "
+                            f"{professional.full_name}"
+                        )
+                        print(f"  Specialty: {professional.specialty}")
+                        print(f"  Date: {slot.slot_date:%Y-%m-%d}")
+                        print(
+                            f"  Time: {slot.start_time:%H:%M} - "
+                            f"{slot.end_time:%H:%M}"
+                        )
+                        print(f"  Booking channel: {appointment.booking_channel}")
+                        print(f"  Slot ID: {slot.slot_id}")
+
+            elif choice == "6":
+                path = input("Input CSV filename: ").strip()
+                result = booking_csv_service.import_availabilities_from_csv(path)
+                print(f"Successfully imported slots: {result['imported']}")
+                print(f"Duplicate slots skipped: {result['duplicates_skipped']}")
+                print(f"Invalid rows rejected: {result['invalid_rows']}")
+                if result["errors"]:
+                    print("Import errors:")
+                    for error in result["errors"]:
+                        print(f"- {error}")
             elif choice == "0":
                 break
             else:
