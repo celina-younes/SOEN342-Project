@@ -7,7 +7,7 @@ from models import (
     HealthcareProfessional,
     Patient,
 )
-
+from repositories import AvailabilityRepository, AppointmentRepository
 
 class ImportResult(TypedDict):
     imported: int
@@ -21,9 +21,13 @@ class BookingAndCsvService:
         self,
         slots: List[AvailabilitySlot],
         appointments: List[Appointment],
+        availability_repository: AvailabilityRepository,
+        appointment_repository: AppointmentRepository,
     ):
         self.slots = slots
         self.appointments = appointments
+        self.availability_repository = availability_repository
+        self.appointment_repository = appointment_repository
 
     def import_availabilities_from_csv(self, file_path: str) -> ImportResult:
         result: ImportResult = {
@@ -123,16 +127,19 @@ class BookingAndCsvService:
                             professional = HealthcareProfessional(*professional_key)
                             professional_by_key[professional_key] = professional
 
-                        self.slots.append(
-                            AvailabilitySlot(
-                                professional=professional,
-                                slot_date=slot_date,
-                                start_time=start_time,
-                                end_time=end_time,
-                            )
+                        new_slot = AvailabilitySlot(
+                            professional=professional,
+                            slot_date=slot_date,
+                            start_time=start_time,
+                            end_time=end_time,
                         )
-                        existing_slots.add(slot_key)
-                        result["imported"] += 1
+
+                        if self.availability_repository.save(new_slot):
+                            self.slots.append(new_slot)
+                            existing_slots.add(slot_key)
+                            result["imported"] += 1
+                        else:
+                            result["duplicates_skipped"] += 1
                     except (TypeError, ValueError) as error:
                         result["invalid_rows"] += 1
                         errors.append(f"Row {row_number}: {error}")
@@ -161,16 +168,50 @@ class BookingAndCsvService:
             raise ValueError(
                 f"Specialty '{target_slot.professional.specialty}' requires a medical referral."
             )
+        booking_channel = booking_channel.strip().upper()
 
-        target_slot.is_booked = True
+        if booking_channel not in ("WALK-IN", "PHONE"):
+            raise ValueError("Invalid booking channel.")
+
         appointment = Appointment(
             patient=patient,
             slot=target_slot,
             booking_channel=booking_channel.upper(),
         )
+        self.appointment_repository.save(appointment)
         self.appointments.append(appointment)
         return appointment
+    def close_appointment(
+        self,
+        appointment_id: str,
+        additional_notes: str = "",
+    ) -> Appointment:
 
+        appointment = next(
+            (
+                a for a in self.appointments
+                if a.appointment_id == appointment_id
+            ),
+            None
+        )
+
+        if appointment is None:
+            raise ValueError("Appointment not found.")
+
+        previous_status = appointment.appointment_status
+        previous_notes = appointment.additional_notes
+
+        appointment.close(additional_notes)
+
+        try:
+            self.appointment_repository.update(appointment)
+        except Exception:
+            appointment.appointment_status = previous_status
+            appointment.additional_notes = previous_notes
+            raise
+
+        return appointment
+    
     def export_availabilities_to_csv(self, file_path: str) -> int:
         headers = [
             "First Name",

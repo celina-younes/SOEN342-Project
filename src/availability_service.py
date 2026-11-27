@@ -1,11 +1,12 @@
 from datetime import date, time, timedelta
 from typing import List, Optional
 from models import AvailabilitySlot, HealthcareProfessional
-
+from repositories import AvailabilityRepository
 
 class AvailabilityService:
-    def __init__(self, slots: List[AvailabilitySlot]):
+    def __init__(self, slots: List[AvailabilitySlot],repository: AvailabilityRepository):
         self.slots = slots
+        self.repository = repository
 
     def create_availability(
         self,
@@ -37,12 +38,14 @@ class AvailabilityService:
                     start_time=start_time,
                     end_time=end_time,
                 )
-                self.slots.append(new_slot)
                 created_slots.append(new_slot)
 
             current += timedelta(days=1)
 
-        return created_slots
+        saved_slots = self.repository.save_many(created_slots)
+        self.slots.extend(saved_slots)
+
+        return saved_slots
 
     def search_availability(
         self,

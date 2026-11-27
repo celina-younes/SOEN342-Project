@@ -2,6 +2,11 @@ from datetime import datetime
 from models import Appointment, AvailabilitySlot, HealthcareProfessional, Patient
 from availability_service import AvailabilityService
 from booking_csv_service import BookingAndCsvService
+from database import Database
+from repositories import (
+    AvailabilityRepository,
+    AppointmentRepository,
+)
 
 def parse_date(prompt: str):
     val = input(prompt).strip()
@@ -14,12 +19,33 @@ def parse_time(prompt: str):
 
 
 def main():
-    slots: list[AvailabilitySlot] = []
-    appointments: list[Appointment] = []
+    database = Database()
 
-    avail_service = AvailabilityService(slots)
-    booking_csv_service = BookingAndCsvService(slots, appointments)
+    try:
+        database.initialize()
+        run_application(database)
+    finally:
+        database.close()
 
+
+def run_application(database: Database):
+    availability_repository = AvailabilityRepository(database)
+    appointment_repository = AppointmentRepository(database)
+
+    slots = availability_repository.get_all()
+    appointments = appointment_repository.get_all(slots)
+
+    avail_service = AvailabilityService(
+        slots,
+        availability_repository
+    )
+
+    booking_csv_service = BookingAndCsvService(
+        slots,
+        appointments,
+        availability_repository,
+        appointment_repository
+    )
     while True:
         print("\n === Appointment Tracking System ===")
         print("1. Make Availability for Healthcare Professional")
@@ -28,6 +54,7 @@ def main():
         print("4. Export Availabilities to CSV")
         print("5. View Booked Appointments")
         print("6. Import Professional Availability from CSV")
+        print("7. Close an Appointment")
         print("0. Exit")
 
         choice = input("Select an option: ").strip()
@@ -75,19 +102,45 @@ def main():
 
             elif choice == "3":
                 slot_id = input("Enter Slot ID to book: ").strip()
-                p_name = input("Patient Full Name: ").strip()
-                p_phone = input("Patient Telephone: ").strip()
-                p_ramq = input("RAMQ No. (Enter if uninsured): ").strip() or None
-                has_ref = input("Does patient have a referral? (y/n): ").strip().lower() == "y"
+                patient_id = input(
+                    "Existing Patient ID (Enter for new patient): "
+                ).strip()
+                if patient_id:
+                    patient = appointment_repository.get_patient(
+                        patient_id
+                    )
+
+                    if patient is None:
+                        raise ValueError("Patient ID not found.")
+
+                else:
+                    p_name = input(
+                        "Patient Full Name: "
+                    ).strip()
+
+                    p_phone = input(
+                        "Patient Telephone: "
+                    ).strip()
+
+                    p_ramq = input(
+                        "RAMQ No. (Enter if uninsured): "
+                    ).strip() or None
+
+                    if not p_name or not p_phone:
+                        raise ValueError(
+                            "Patient name and telephone are required."
+                        )
+                    has_ref = input("Does patient have a referral? (y/n): ").strip().lower() == "y"
+                    patient = Patient(p_name, p_phone, p_ramq, has_ref)
+
                 req_ref = input("Does this service require a referral? (y/n): ").strip().lower() == "y"
                 channel = input("Booking channel (WALK-IN / PHONE): ").strip().upper() or "WALK-IN"
-
-                patient = Patient(p_name, p_phone, p_ramq, has_ref)
                 appt = booking_csv_service.book_appointment(slot_id, patient, channel, req_ref)
                 slot = appt.slot
                 professional = slot.professional
                 print("\nAppointment booked successfully:")
                 print(f"Appointment ID: {appt.appointment_id}")
+                print(f"  Patient ID: {appt.patient.patient_id}")
                 print(
                     f"  Patient: {appt.patient.full_name} "
                     f"({appt.patient.telephone})"
@@ -120,6 +173,9 @@ def main():
                         slot = appointment.slot
                         professional = slot.professional
                         print(f"\nAppointment ID: {appointment.appointment_id}")
+                        print(f"  Patient ID: {appointment.patient.patient_id}")
+                        print(f"  Status: {appointment.appointment_status}")
+                        print(f"  Additional notes: {appointment.additional_notes}")
                         print(
                             f"  Patient: {appointment.patient.full_name} "
                             f"({appointment.patient.telephone})"
@@ -136,6 +192,7 @@ def main():
                         )
                         print(f"  Booking channel: {appointment.booking_channel}")
                         print(f"  Slot ID: {slot.slot_id}")
+                input("\nPress Enter to return to the menu...")
 
             elif choice == "6":
                 path = input("Input CSV filename: ").strip()
@@ -147,6 +204,24 @@ def main():
                     print("Import errors:")
                     for error in result["errors"]:
                         print(f"- {error}")
+            elif choice == "7":
+                appointment_id = input(
+                    "Enter Appointment ID: "
+                ).strip()
+
+                additional_notes = input(
+                    "Additional notes (Enter to skip): "
+                ).strip()
+
+                appointment = booking_csv_service.close_appointment(
+                    appointment_id,
+                    additional_notes
+                )
+
+                print("\nAppointment closed successfully.")
+                print(f"Appointment ID: {appointment.appointment_id}")
+                print(f"Status: {appointment.appointment_status}")
+                print(f"Additional notes: {appointment.additional_notes}")
             elif choice == "0":
                 break
             else:
