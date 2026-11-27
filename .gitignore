@@ -14,3 +14,6 @@ SQLite database files
 Virtual environments
 .venv/
 venv/
+
+# Generated calendar export files
+*.ics

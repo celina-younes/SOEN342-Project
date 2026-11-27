@@ -163,6 +163,27 @@ class AvailabilityRepository:
         ]
 
 
+class ResourceRepository:
+    def __init__(self, database: Database):
+        self.connection = database.connection
+
+    def get_all(self) -> list[Resource]:
+        rows = self.connection.execute("""
+            SELECT *
+            FROM resources
+            ORDER BY resource_id
+        """).fetchall()
+
+        return [
+            Resource(
+                name=row["name"],
+                resource_type=row["resource_type"],
+                resource_id=row["resource_id"],
+            )
+            for row in rows
+        ]
+
+
 class AppointmentRepository:
     def __init__(self, database: Database):
         self.connection = database.connection
@@ -230,6 +251,11 @@ class AppointmentRepository:
 
     def save(self, appointment: Appointment):
         with self.connection:
+
+            self.connection.execute("BEGIN IMMEDIATE")
+
+            self.validate_booking(appointment)
+        
             patient = self.resolve_patient(appointment.patient)
 
             self.connection.execute("""
@@ -272,9 +298,10 @@ class AppointmentRepository:
                     slot_id,
                     booking_channel,
                     appointment_status,
-                    additional_notes
+                    additional_notes,
+                    referral_type
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 appointment.appointment_id,
                 patient.patient_id,
@@ -282,22 +309,11 @@ class AppointmentRepository:
                 appointment.booking_channel,
                 appointment.appointment_status,
                 appointment.additional_notes,
+                appointment.referral_type,
             ))
 
             for resource in appointment.resources:
-                self.connection.execute("""
-                    INSERT INTO resources (
-                        resource_id,
-                        name,
-                        resource_type
-                    )
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(resource_id) DO NOTHING
-                """, (
-                    resource.resource_id,
-                    resource.name,
-                    resource.resource_type,
-                ))
+                
 
                 self.connection.execute("""
                     INSERT INTO appointment_resources (
@@ -312,6 +328,107 @@ class AppointmentRepository:
 
         appointment.patient = patient
         appointment.slot.is_booked = True
+
+
+    
+    def validate_booking(self, appointment: Appointment):
+        slot = appointment.slot
+
+        stored_slot = self.connection.execute("""
+            SELECT *
+            FROM availability_slots
+            WHERE slot_id = ?
+        """, (slot.slot_id,)).fetchone()
+
+        if stored_slot is None:
+            raise ValueError("Availability slot not found.")
+
+        if (
+            stored_slot["professional_id"]
+                != slot.professional.professional_id
+            or stored_slot["slot_date"]
+                != slot.slot_date.isoformat()
+            or stored_slot["start_time"]
+                != slot.start_time.isoformat()
+            or stored_slot["end_time"]
+                != slot.end_time.isoformat()
+        ):
+            raise ValueError("Appointment does not match availability.")
+
+        if slot.start_time >= slot.end_time:
+            raise ValueError(
+                "Start time must be earlier than end time."
+            )
+
+        if stored_slot["is_booked"]:
+            raise ValueError("Selected time slot is already booked.")
+
+        professional_conflict = self.connection.execute("""
+            SELECT a.appointment_id
+            FROM appointments a
+            JOIN availability_slots s
+                ON a.slot_id = s.slot_id
+            WHERE s.professional_id = ?
+              AND s.slot_date = ?
+              AND a.appointment_status != 'Cancelled'
+              AND s.start_time < ?
+              AND s.end_time > ?
+        """, (
+            slot.professional.professional_id,
+            slot.slot_date.isoformat(),
+            slot.end_time.isoformat(),
+            slot.start_time.isoformat(),
+        )).fetchone()
+
+        if professional_conflict:
+            raise ValueError(
+                "Healthcare professional is already booked "
+                "during this time."
+            )
+
+        resource_ids = set()
+
+        for resource in appointment.resources:
+
+            if resource.resource_id in resource_ids:
+                raise ValueError("Duplicate resource selected.")
+
+            resource_ids.add(resource.resource_id)
+
+            existing_resource = self.connection.execute("""
+                SELECT resource_id
+                FROM resources
+                WHERE resource_id = ?
+            """, (resource.resource_id,)).fetchone()
+
+            if existing_resource is None:
+                raise ValueError("Selected resource does not exist.")
+
+            resource_conflict = self.connection.execute("""
+                SELECT a.appointment_id
+                FROM appointment_resources ar
+                JOIN appointments a
+                    ON ar.appointment_id = a.appointment_id
+                JOIN availability_slots s
+                    ON a.slot_id = s.slot_id
+                WHERE ar.resource_id = ?
+                  AND s.slot_date = ?
+                  AND a.appointment_status != 'Cancelled'
+                  AND s.start_time < ?
+                  AND s.end_time > ?
+            """, (
+                resource.resource_id,
+                slot.slot_date.isoformat(),
+                slot.end_time.isoformat(),
+                slot.start_time.isoformat(),
+            )).fetchone()
+
+            if resource_conflict:
+                raise ValueError(
+                    f"Resource '{resource.name}' is already booked "
+                    "during this time."
+                )
+
     def update(self, appointment: Appointment):
         with self.connection:
             result = self.connection.execute("""
@@ -389,6 +506,7 @@ class AppointmentRepository:
                 resources=resources_by_appointment.get(
                     row["appointment_id"], []
                 ),
+                referral_type=row["referral_type"],
             )
             for row in rows
         ]

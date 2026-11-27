@@ -37,6 +37,13 @@ class AvailabilitySlot:
     is_booked: bool = False
     slot_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
 
+    def overlaps(self, other: "AvailabilitySlot") -> bool:
+        return (
+            self.slot_date == other.slot_date
+            and self.start_time < other.end_time
+            and other.start_time < self.end_time
+        )
+
     def __str__(self) -> str:
         status = "BOOKED" if self.is_booked else "AVAILABLE"
         return (
@@ -63,6 +70,7 @@ class Appointment:
     appointment_status: str = "Confirmed"
     additional_notes: str = ""
     resources: list[Resource] = field(default_factory=list)
+    referral_type: Optional[str] = None
 
     def close(self, additional_notes: str = ""):
             if self.appointment_status == "Completed":
