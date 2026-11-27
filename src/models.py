@@ -10,6 +10,9 @@ class HealthcareProfessional:
     last_name: str
     title: str
     specialty: str
+    professional_id: str = field(
+        default_factory=lambda: str(uuid.uuid4())
+    )
 
     @property
     def full_name(self) -> str:
@@ -51,11 +54,30 @@ class Appointment:
     booking_channel: str  # "WALK-IN" or "PHONE"
     appointment_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     appointment_status: str = "Confirmed"
+    additional_notes: str = ""
+    resources: list[Resource] = field(default_factory=list)
 
-    def str(self) -> str:
+    def close(self, additional_notes: str = ""):
+            if self.appointment_status == "Completed":
+                raise ValueError("Appointment is already closed.")
+
+            if self.appointment_status == "Cancelled":
+                raise ValueError("Cannot close a cancelled appointment.")
+
+            self.additional_notes = additional_notes.strip()
+            self.appointment_status = "Completed"
+            
+    def __str__(self) -> str:
         return (
             f"Appt #{self.appointment_id} ({self.booking_channel}) -> "
             f"Patient: {self.patient.full_name} ({self.patient.telephone}) | "
             f"Prof: {self.slot.professional.full_name} on {self.slot.slot_date} "
             f"at {self.slot.start_time.strftime('%H:%M')}"
         )
+@dataclass
+class Resource:
+    name: str
+    resource_type: str
+    resource_id: str = field(
+        default_factory=lambda: str(uuid.uuid4())
+    )
