@@ -46,7 +46,14 @@ class AvailabilitySlot:
             f"({self.professional.specialty}) [{status}]"
         )
 
-
+@dataclass
+class Resource:
+    name: str
+    resource_type: str
+    resource_id: str = field(
+        default_factory=lambda: str(uuid.uuid4())
+    )
+    
 @dataclass
 class Appointment:
     patient: Patient
@@ -74,10 +81,3 @@ class Appointment:
             f"Prof: {self.slot.professional.full_name} on {self.slot.slot_date} "
             f"at {self.slot.start_time.strftime('%H:%M')}"
         )
-@dataclass
-class Resource:
-    name: str
-    resource_type: str
-    resource_id: str = field(
-        default_factory=lambda: str(uuid.uuid4())
-    )
