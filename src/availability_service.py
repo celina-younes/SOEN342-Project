@@ -4,9 +4,12 @@ from models import AvailabilitySlot, HealthcareProfessional
 from repositories import AvailabilityRepository
 
 class AvailabilityService:
-    def __init__(self, slots: List[AvailabilitySlot],repository: AvailabilityRepository):
+    def __init__(self, slots: List[AvailabilitySlot],repository: AvailabilityRepository, appointments=None):
         self.slots = slots
         self.repository = repository
+        self.appointments = (
+            appointments if appointments is not None else []
+        )
 
     def create_availability(
         self,
@@ -54,7 +57,17 @@ class AvailabilityService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> List[AvailabilitySlot]:
-        results = [s for s in self.slots if not s.is_booked]
+        results = [
+            slot for slot in self.slots
+            if not slot.is_booked
+            and not any(
+                appointment.appointment_status != "Cancelled"
+                and appointment.slot.professional.professional_id
+                    == slot.professional.professional_id
+                and slot.overlaps(appointment.slot)
+                for appointment in self.appointments
+            )
+        ]
 
         if specialty:
             results = [

@@ -6,7 +6,11 @@ from database import Database
 from repositories import (
     AvailabilityRepository,
     AppointmentRepository,
+    ProfessionalRepository,
+    ResourceRepository,
 )
+from ical_gateway import ICalendarGateway
+from calendar_export_service import CalendarExportService
 
 def parse_date(prompt: str):
     val = input(prompt).strip()
@@ -31,13 +35,16 @@ def main():
 def run_application(database: Database):
     availability_repository = AvailabilityRepository(database)
     appointment_repository = AppointmentRepository(database)
+    professional_repository = ProfessionalRepository(database)
+    resource_repository = ResourceRepository(database)
 
     slots = availability_repository.get_all()
     appointments = appointment_repository.get_all(slots)
 
     avail_service = AvailabilityService(
         slots,
-        availability_repository
+        availability_repository,
+        appointments
     )
 
     booking_csv_service = BookingAndCsvService(
@@ -45,6 +52,13 @@ def run_application(database: Database):
         appointments,
         availability_repository,
         appointment_repository
+    )
+
+    calendar_gateway = ICalendarGateway()
+
+    calendar_service = CalendarExportService(
+        appointments,
+        calendar_gateway
     )
     while True:
         print("\n === Appointment Tracking System ===")
@@ -55,6 +69,7 @@ def run_application(database: Database):
         print("5. View Booked Appointments")
         print("6. Import Professional Availability from CSV")
         print("7. Close an Appointment")
+        print("8. Export Appointments to iCalendar")
         print("0. Exit")
 
         choice = input("Select an option: ").strip()
@@ -133,9 +148,71 @@ def run_application(database: Database):
                     has_ref = input("Does patient have a referral? (y/n): ").strip().lower() == "y"
                     patient = Patient(p_name, p_phone, p_ramq, has_ref)
 
-                req_ref = input("Does this service require a referral? (y/n): ").strip().lower() == "y"
-                channel = input("Booking channel (WALK-IN / PHONE): ").strip().upper() or "WALK-IN"
-                appt = booking_csv_service.book_appointment(slot_id, patient, channel, req_ref)
+                
+                req_ref = input(
+                    "Does this service require a referral? (y/n): "
+                ).strip().lower() == "y"
+
+                referral_type = None
+
+                if patient.has_referral:
+                    referral_type = input(
+                        "Referral type (Enter to skip): "
+                    ).strip() or None
+
+                channel = input(
+                    "Booking channel (WALK-IN / PHONE): "
+                ).strip().upper() or "WALK-IN"
+
+                available_resources = resource_repository.get_all()
+
+                print("\nResource Catalog:")
+
+                for resource in available_resources:
+                    print(
+                        f"{resource.resource_id}: "
+                        f"{resource.name} "
+                        f"({resource.resource_type})"
+                    )
+
+                raw_resources = input(
+                    "Required resource IDs "
+                    "(comma-separated, Enter for none): "
+                ).strip()
+
+                resources_by_id = {
+                    resource.resource_id: resource
+                    for resource in available_resources
+                }
+
+                selected_resources = []
+
+                if raw_resources:
+                    resource_ids = [
+                        value.strip().upper()
+                        for value in raw_resources.split(",")
+                    ]
+
+                    for resource_id in resource_ids:
+
+                        if resource_id not in resources_by_id:
+                            raise ValueError(
+                                f"Unknown resource ID: {resource_id}"
+                            )
+
+                        selected_resources.append(
+                            resources_by_id[resource_id]
+                        )
+
+                appt = booking_csv_service.book_appointment(
+                    slot_id,
+                    patient,
+                    channel,
+                    req_ref,
+                    resources=selected_resources,
+                    referral_type=referral_type
+                )
+
                 slot = appt.slot
                 professional = slot.professional
                 print("\nAppointment booked successfully:")
@@ -157,6 +234,14 @@ def run_application(database: Database):
                 )
                 print(f"  Booking channel: {appt.booking_channel}")
                 print(f"  Slot ID: {slot.slot_id}")
+                if appt.resources:
+                    print("  Resources:")
+
+                    for resource in appt.resources:
+                        print(f"    - {resource.name}")
+
+                if appt.referral_type:
+                    print(f"  Referral type: {appt.referral_type}")
 
             elif choice == "4":
                 path = input("Output CSV filename (default: availabilities_export.csv): ").strip()
@@ -192,6 +277,17 @@ def run_application(database: Database):
                         )
                         print(f"  Booking channel: {appointment.booking_channel}")
                         print(f"  Slot ID: {slot.slot_id}")
+                        if appointment.resources:
+                            print("  Resources:")
+
+                            for resource in appointment.resources:
+                                print(f"    - {resource.name}")
+
+                        if appointment.referral_type:
+                            print(
+                                f"  Referral type: "
+                                f"{appointment.referral_type}"
+                            )
                 input("\nPress Enter to return to the menu...")
 
             elif choice == "6":
@@ -222,6 +318,106 @@ def run_application(database: Database):
                 print(f"Appointment ID: {appointment.appointment_id}")
                 print(f"Status: {appointment.appointment_status}")
                 print(f"Additional notes: {appointment.additional_notes}")
+
+           
+            elif choice == "8":
+
+                print("\nExport appointments by:")
+                print("1. Healthcare Professional")
+                print("2. Patient")
+                print("3. Referral Type")
+
+                export_choice = input(
+                    "Select filter: "
+                ).strip()
+
+                if export_choice == "1":
+                    filter_type = "professional"
+
+                    professionals = professional_repository.get_all()
+
+                    print("\nHealthcare Professionals:")
+
+                    for professional in professionals.values():
+                        print(
+                            f"{professional.professional_id}: "
+                            f"{professional.title} "
+                            f"{professional.full_name}"
+                        )
+
+                    filter_value = input(
+                        "Enter Professional ID: "
+                    ).strip()
+
+                    if filter_value not in professionals:
+                        raise ValueError("Professional not found.")
+
+                elif export_choice == "2":
+                    filter_type = "patient"
+
+                    patients = {
+                        appointment.patient.patient_id:
+                            appointment.patient
+                        for appointment in appointments
+                    }
+
+                    print("\nPatients:")
+
+                    for patient in patients.values():
+                        print(
+                            f"{patient.patient_id}: "
+                            f"{patient.full_name}"
+                        )
+
+                    filter_value = input(
+                        "Enter Patient ID: "
+                    ).strip()
+
+                    if filter_value not in patients:
+                        raise ValueError("Patient not found.")
+
+                elif export_choice == "3":
+                    filter_type = "referral"
+
+                    referral_types = sorted({
+                        appointment.referral_type
+                        for appointment in appointments
+                        if appointment.referral_type
+                    })
+
+                    print("\nReferral types:")
+
+                    for referral_type in referral_types:
+                        print(referral_type)
+
+                    filter_value = input(
+                        "Enter Referral Type: "
+                    ).strip()
+
+                else:
+                    raise ValueError("Invalid export filter.")
+
+                start_date = parse_date(
+                    "Start Date YYYY-MM-DD (Enter for today): "
+                )
+
+                file_path = input(
+                    "Output filename "
+                    "(default: appointments.ics): "
+                ).strip() or "appointments.ics"
+
+                count = calendar_service.export_appointments(
+                    filter_type,
+                    filter_value,
+                    file_path,
+                    start_date
+                )
+
+                print(
+                    f"Exported {count} appointment(s) "
+                    f"to '{file_path}'."
+                )
+ 
             elif choice == "0":
                 break
             else:

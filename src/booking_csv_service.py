@@ -6,6 +6,7 @@ from models import (
     AvailabilitySlot,
     HealthcareProfessional,
     Patient,
+    Resource,
 )
 from repositories import AvailabilityRepository, AppointmentRepository
 
@@ -157,6 +158,8 @@ class BookingAndCsvService:
         patient: Patient,
         booking_channel: str = "WALK-IN",
         requires_referral: bool = False,
+        resources: list[Resource] | None = None,
+        referral_type: str | None = None,
     ) -> Appointment:
         target_slot = next((s for s in self.slots if s.slot_id == slot_id), None)
 
@@ -164,10 +167,14 @@ class BookingAndCsvService:
             raise ValueError(f"Slot ID '{slot_id}' not found.")
         if target_slot.is_booked:
             raise ValueError("Selected time slot is already booked.")
-        if requires_referral and not patient.has_referral:
-            raise ValueError(
-                f"Specialty '{target_slot.professional.specialty}' requires a medical referral."
-            )
+        if referral_type:
+            referral_type = referral_type.strip() or None
+
+        if requires_referral and not referral_type:
+            raise ValueError("A referral type is required.")
+
+        if referral_type and not patient.has_referral:
+            raise ValueError("Patient does not have a referral.")
         booking_channel = booking_channel.strip().upper()
 
         if booking_channel not in ("WALK-IN", "PHONE"):
@@ -177,6 +184,9 @@ class BookingAndCsvService:
             patient=patient,
             slot=target_slot,
             booking_channel=booking_channel.upper(),
+            resources=list(resources or []),
+            referral_type=referral_type,
+        
         )
         self.appointment_repository.save(appointment)
         self.appointments.append(appointment)

@@ -66,6 +66,7 @@ class Database:
                     appointment_status TEXT NOT NULL
                         DEFAULT 'Confirmed',
                     additional_notes TEXT NOT NULL DEFAULT '',
+                    referral_type TEXT,
 
                     FOREIGN KEY (patient_id)
                         REFERENCES patients(patient_id),
@@ -93,6 +94,34 @@ class Database:
                         REFERENCES resources(resource_id)
                 );
             """)
+
+            columns = {
+                row["name"]
+                for row in self.connection.execute(
+                    "PRAGMA table_info(appointments)"
+                )
+            }
+
+            if "referral_type" not in columns:
+                self.connection.execute("""
+                    ALTER TABLE appointments
+                    ADD COLUMN referral_type TEXT
+                """)
+
+            self.connection.executemany("""
+                INSERT INTO resources (
+                    resource_id,
+                    name,
+                    resource_type
+                )
+                VALUES (?, ?, ?)
+                ON CONFLICT(resource_id) DO NOTHING
+            """, [
+                ("R001", "Examination Room 1", "ROOM"),
+                ("R002", "Examination Room 2", "ROOM"),
+                ("R003", "Ultrasound Machine", "EQUIPMENT"),
+                ("R004", "Assisting Nurse", "HUMAN"),
+            ])
 
     def close(self):
         self.connection.close()
