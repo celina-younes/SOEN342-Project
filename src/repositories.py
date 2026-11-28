@@ -6,6 +6,7 @@ from models import (
     Patient,
     AvailabilitySlot,
     Appointment,
+    Referral,
     Resource,
 )
 
@@ -510,3 +511,153 @@ class AppointmentRepository:
             )
             for row in rows
         ]
+
+
+class ReferralRepository:
+    def __init__(self, database: Database):
+        self.connection = database.connection
+
+    def save(self, referral: Referral):
+        referring_professional = referral.referring_professional
+        requested_professional = referral.requested_professional
+
+        if referring_professional is None:
+            raise ValueError("A referring professional is required.")
+
+        with self.connection:
+            patient = self.connection.execute("""
+                SELECT patient_id
+                FROM patients
+                WHERE patient_id = ?
+            """, (referral.patient.patient_id,)).fetchone()
+
+            if patient is None:
+                raise ValueError(
+                    "Patient must be saved before its referral."
+                )
+
+            self.connection.execute("""
+                INSERT INTO referrals (
+                    referral_id,
+                    patient_id,
+                    referring_professional_id,
+                    referring_professional_first_name,
+                    referring_professional_last_name,
+                    referring_professional_title,
+                    referring_professional_specialty,
+                    requested_specialty,
+                    requested_professional_id,
+                    requested_professional_first_name,
+                    requested_professional_last_name,
+                    requested_professional_title,
+                    requested_professional_specialty,
+                    referral_type,
+                    clinical_reason,
+                    priority,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                referral.referral_id,
+                referral.patient.patient_id,
+                referring_professional.professional_id,
+                referring_professional.first_name,
+                referring_professional.last_name,
+                referring_professional.title,
+                referring_professional.specialty,
+                referral.requested_specialty,
+                (
+                    requested_professional.professional_id
+                    if requested_professional is not None else None
+                ),
+                (
+                    requested_professional.first_name
+                    if requested_professional is not None else None
+                ),
+                (
+                    requested_professional.last_name
+                    if requested_professional is not None else None
+                ),
+                (
+                    requested_professional.title
+                    if requested_professional is not None else None
+                ),
+                (
+                    requested_professional.specialty
+                    if requested_professional is not None else None
+                ),
+                referral.referral_type,
+                referral.clinical_reason,
+                referral.priority,
+                referral.status,
+            ))
+
+    @staticmethod
+    def _from_row(row) -> Referral:
+        referring_professional = HealthcareProfessional(
+            first_name=row["referring_professional_first_name"],
+            last_name=row["referring_professional_last_name"],
+            title=row["referring_professional_title"],
+            specialty=row["referring_professional_specialty"],
+            professional_id=row["referring_professional_id"],
+        )
+
+        requested_professional = None
+        if row["requested_professional_id"] is not None:
+            requested_professional = HealthcareProfessional(
+                first_name=row["requested_professional_first_name"],
+                last_name=row["requested_professional_last_name"],
+                title=row["requested_professional_title"],
+                specialty=row["requested_professional_specialty"],
+                professional_id=row["requested_professional_id"],
+            )
+
+        patient = Patient(
+            full_name=row["patient_full_name"],
+            telephone=row["patient_telephone"],
+            ramq_no=row["patient_ramq_no"],
+            has_referral=bool(row["patient_has_referral"]),
+            patient_id=row["patient_id"],
+        )
+
+        return Referral(
+            patient=patient,
+            clinical_reason=row["clinical_reason"],
+            priority=row["priority"],
+            status=row["status"],
+            referring_professional=referring_professional,
+            requested_specialty=row["requested_specialty"],
+            requested_professional=requested_professional,
+            referral_id=row["referral_id"],
+            referral_type=row["referral_type"],
+        )
+
+    def get_by_id(self, referral_id: str) -> Referral | None:
+        row = self.connection.execute("""
+            SELECT r.*,
+                   p.full_name AS patient_full_name,
+                   p.telephone AS patient_telephone,
+                   p.ramq_no AS patient_ramq_no,
+                   p.has_referral AS patient_has_referral
+            FROM referrals r
+            JOIN patients p
+                ON p.patient_id = r.patient_id
+            WHERE r.referral_id = ?
+        """, (referral_id,)).fetchone()
+
+        return self._from_row(row) if row is not None else None
+
+    def get_all(self) -> list[Referral]:
+        rows = self.connection.execute("""
+            SELECT r.*,
+                   p.full_name AS patient_full_name,
+                   p.telephone AS patient_telephone,
+                   p.ramq_no AS patient_ramq_no,
+                   p.has_referral AS patient_has_referral
+            FROM referrals r
+            JOIN patients p
+                ON p.patient_id = r.patient_id
+            ORDER BY r.referral_id
+        """).fetchall()
+
+        return [self._from_row(row) for row in rows]
