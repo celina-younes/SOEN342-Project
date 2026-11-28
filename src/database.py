@@ -35,6 +35,56 @@ class Database:
                         CHECK (has_referral IN (0, 1))
                 );
 
+                CREATE TABLE IF NOT EXISTS referrals (
+                    referral_id TEXT PRIMARY KEY,
+                    patient_id TEXT NOT NULL,
+                    referring_professional_id TEXT NOT NULL,
+                    referring_professional_first_name TEXT NOT NULL,
+                    referring_professional_last_name TEXT NOT NULL,
+                    referring_professional_title TEXT NOT NULL,
+                    referring_professional_specialty TEXT NOT NULL,
+                    requested_specialty TEXT,
+                    requested_professional_id TEXT,
+                    requested_professional_first_name TEXT,
+                    requested_professional_last_name TEXT,
+                    requested_professional_title TEXT,
+                    requested_professional_specialty TEXT,
+                    referral_type TEXT NOT NULL
+                        CHECK (length(trim(referral_type)) > 0),
+                    clinical_reason TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Pending',
+
+                    FOREIGN KEY (patient_id)
+                        REFERENCES patients(patient_id),
+
+                    CHECK (
+                        (
+                            requested_specialty IS NOT NULL
+                            AND length(trim(requested_specialty)) > 0
+                        )
+                        OR requested_professional_id IS NOT NULL
+                    ),
+
+                    CHECK (
+                        (
+                            requested_professional_id IS NULL
+                            AND requested_professional_first_name IS NULL
+                            AND requested_professional_last_name IS NULL
+                            AND requested_professional_title IS NULL
+                            AND requested_professional_specialty IS NULL
+                        )
+                        OR
+                        (
+                            requested_professional_id IS NOT NULL
+                            AND requested_professional_first_name IS NOT NULL
+                            AND requested_professional_last_name IS NOT NULL
+                            AND requested_professional_title IS NOT NULL
+                            AND requested_professional_specialty IS NOT NULL
+                        )
+                    )
+                );
+
                 CREATE TABLE IF NOT EXISTS availability_slots (
                     slot_id TEXT PRIMARY KEY,
                     professional_id TEXT NOT NULL,

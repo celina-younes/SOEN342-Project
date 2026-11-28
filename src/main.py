@@ -1,5 +1,11 @@
 from datetime import datetime
-from models import Appointment, AvailabilitySlot, HealthcareProfessional, Patient
+from models import (
+    Appointment,
+    AvailabilitySlot,
+    HealthcareProfessional,
+    Patient,
+    Referral,
+)
 from availability_service import AvailabilityService
 from booking_csv_service import BookingAndCsvService
 from database import Database
@@ -7,6 +13,7 @@ from repositories import (
     AvailabilityRepository,
     AppointmentRepository,
     ProfessionalRepository,
+    ReferralRepository,
     ResourceRepository,
 )
 from ical_gateway import ICalendarGateway
@@ -20,6 +27,24 @@ def parse_date(prompt: str):
 def parse_time(prompt: str):
     val = input(prompt).strip()
     return datetime.strptime(val, "%H:%M").time()
+
+
+class ReferralInputCancelled(Exception):
+    pass
+
+
+def prompt_referral_input(prompt: str) -> str:
+    try:
+        value = input(f"{prompt} (type 'cancel' to return to the menu): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise ReferralInputCancelled from None
+
+    if value.casefold() == "cancel":
+        raise ReferralInputCancelled
+    if not value:
+        raise ValueError(f"{prompt} is required.")
+
+    return value
 
 
 def main():
@@ -36,6 +61,7 @@ def run_application(database: Database):
     availability_repository = AvailabilityRepository(database)
     appointment_repository = AppointmentRepository(database)
     professional_repository = ProfessionalRepository(database)
+    referral_repository = ReferralRepository(database)
     resource_repository = ResourceRepository(database)
 
     slots = availability_repository.get_all()
@@ -70,6 +96,7 @@ def run_application(database: Database):
         print("6. Import Professional Availability from CSV")
         print("7. Close an Appointment")
         print("8. Export Appointments to iCalendar")
+        print("9. Process Medical Referral")
         print("0. Exit")
 
         choice = input("Select an option: ").strip()
@@ -417,6 +444,155 @@ def run_application(database: Database):
                     f"Exported {count} appointment(s) "
                     f"to '{file_path}'."
                 )
+
+            elif choice == "9":
+                try:
+                    patient_rows = database.connection.execute("""
+                        SELECT patient_id, full_name, telephone
+                        FROM patients
+                        ORDER BY full_name, patient_id
+                    """).fetchall()
+
+                    if not patient_rows:
+                        raise ValueError(
+                            "No existing patients are available. "
+                            "Create a patient through the booking workflow first."
+                        )
+
+                    print("\nPatients:")
+                    for row in patient_rows:
+                        print(
+                            f"{row['patient_id']}: {row['full_name']} "
+                            f"({row['telephone']})"
+                        )
+
+                    patient_id = prompt_referral_input("Patient ID")
+                    patient = appointment_repository.get_patient(patient_id)
+                    if patient is None:
+                        raise ValueError("Patient ID not found.")
+
+                    professionals = professional_repository.get_all()
+                    if professionals:
+                        print("\nLocal Healthcare Professionals:")
+                        for professional in professionals.values():
+                            print(
+                                f"{professional.professional_id}: "
+                                f"{professional.title} "
+                                f"{professional.full_name} "
+                                f"({professional.specialty})"
+                            )
+                    else:
+                        print(
+                            "\nNo local healthcare professionals found. "
+                            "You can enter an external referring professional."
+                        )
+
+                    referrer_type = prompt_referral_input(
+                        "Referring professional: 1 for local, 2 for external"
+                    )
+                    if referrer_type == "1":
+                        if not professionals:
+                            raise ValueError(
+                                "No local healthcare professionals are available."
+                            )
+
+                        referrer_id = prompt_referral_input(
+                            "Referring professional ID"
+                        )
+                        referring_professional = professionals.get(referrer_id)
+                        if referring_professional is None:
+                            raise ValueError(
+                                "Referring professional ID not found."
+                            )
+                    elif referrer_type == "2":
+                        first_name = prompt_referral_input(
+                            "External professional first name"
+                        )
+                        last_name = prompt_referral_input(
+                            "External professional last name"
+                        )
+                        title = prompt_referral_input(
+                            "External professional title"
+                        )
+                        specialty = prompt_referral_input(
+                            "External professional specialty"
+                        )
+                        referring_professional = HealthcareProfessional(
+                            first_name,
+                            last_name,
+                            title,
+                            specialty,
+                        )
+                    else:
+                        raise ValueError(
+                            "Choose 1 for a local or 2 for an external professional."
+                        )
+
+                    target_type = prompt_referral_input(
+                        "Requested target: 1 for specialty, "
+                        "2 for professional, 3 for both"
+                    )
+                    requested_specialty = None
+                    requested_professional = None
+
+                    if target_type in ("1", "3"):
+                        requested_specialty = prompt_referral_input(
+                            "Requested specialty"
+                        )
+
+                    if target_type in ("2", "3"):
+                        if not professionals:
+                            raise ValueError(
+                                "No local healthcare professionals are available "
+                                "to select as the requested professional."
+                            )
+
+                        print("\nRequested Professionals:")
+                        for professional in professionals.values():
+                            print(
+                                f"{professional.professional_id}: "
+                                f"{professional.title} "
+                                f"{professional.full_name} "
+                                f"({professional.specialty})"
+                            )
+
+                        requested_professional_id = prompt_referral_input(
+                            "Requested professional ID"
+                        )
+                        requested_professional = professionals.get(
+                            requested_professional_id
+                        )
+                        if requested_professional is None:
+                            raise ValueError(
+                                "Requested professional ID not found."
+                            )
+                    elif target_type != "1":
+                        raise ValueError(
+                            "Choose 1 for specialty, 2 for professional, "
+                            "or 3 for both."
+                        )
+
+                    referral_type = prompt_referral_input("Referral type")
+                    clinical_reason = prompt_referral_input("Clinical reason")
+                    priority = prompt_referral_input("Priority")
+
+                    referral = Referral(
+                        patient=patient,
+                        referring_professional=referring_professional,
+                        requested_specialty=requested_specialty,
+                        requested_professional=requested_professional,
+                        referral_type=referral_type,
+                        clinical_reason=clinical_reason,
+                        priority=priority,
+                        status="Pending",
+                    )
+                    referral_repository.save(referral)
+
+                    print("\nReferral created successfully.")
+                    print(f"Referral ID: {referral.referral_id}")
+                    print(f"Status: {referral.status}")
+                except ReferralInputCancelled:
+                    print("Referral entry cancelled; no referral was saved.")
  
             elif choice == "0":
                 break

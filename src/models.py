@@ -27,6 +27,37 @@ class Patient:
     has_referral: bool = False
     patient_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
+8
+@dataclass
+class Referral:
+    patient: Patient
+    clinical_reason: str
+    priority: str
+    status: str = "Pending"
+    referring_professional: Optional[HealthcareProfessional] = None
+    requested_specialty: Optional[str] = None
+    requested_professional: Optional[HealthcareProfessional] = None
+    referral_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    referral_type: str = field(kw_only=True)
+
+    def __post_init__(self):
+        if not isinstance(self.referral_type, str) or not self.referral_type.strip():
+            raise ValueError("A referral type is required.")
+
+        if self.referring_professional is None:
+            raise ValueError("A referring professional is required.")
+
+        if (
+            self.requested_professional is None
+            and not (
+                self.requested_specialty
+                and self.requested_specialty.strip()
+            )
+        ):
+            raise ValueError(
+                "A requested specialty or requested professional is required."
+            )
+
 
 @dataclass
 class AvailabilitySlot:
